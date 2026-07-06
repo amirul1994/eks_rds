@@ -1952,6 +1952,148 @@ helm install cluster-autoscaler autoscaler/cluster-autoscaler \
   --set-string extraArgs.node-group-auto-discovery="asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/myapp-production"
 ```
 
+**Deploy Opentelemetry for Tracing**
+
+```bash
+# Install cert-manager
+kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v1.12.0/cert-manager.yaml
+```
+```bash
+#Create the Trust Policy
+
+OIDC_ARN=$(aws iam list-open-id-connect-providers --query "OpenIDConnectProviderList[0]" --output text)
+
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "Account ID: $ACCOUNT_ID"
+```
+
+```bash
+cat > trust-policy-adot.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "$OIDC_ARN"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.us-east-1.amazonaws.com/id/46488685AC5CD97ECB03853DE89C4BD7:sub": "system:serviceaccount:opentelemetry-operator-system:adot-collector"
+        }
+      }
+    }
+  ]
+}
+EOF
+```
+
+```bash
+aws iam create-role \
+  --role-name ADOTCollectorRole \
+  --assume-role-policy-document file://trust-policy-adot.json
+```
+
+```bash
+aws iam attach-role-policy \
+  --role-name ADOTCollectorRole \
+  --policy-arn arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+```
+
+```bash
+ROLE_ARN=$(aws iam get-role --role-name ADOTCollectorRole --query "Role.Arn" --output text)
+echo "Role ARN: $ROLE_ARN"
+```
+
+```bash
+#Check Available ADOT Versions
+
+aws eks describe-addon-versions \
+  --addon-name adot \
+  --kubernetes-version 1.31 \
+  --query 'addons[0].addonVersions[].addonVersion' \
+  --output table
+```
+
+```bash
+#Install the ADOT Addon
+
+aws eks create-addon \
+  --cluster-name myapp-production \
+  --addon-name adot \
+  --addon-version v0.151.0-eksbuild.2 \
+  --service-account-role-arn $ROLE_ARN
+```
+
+```bash
+#Verify the Addon Status
+
+aws eks describe-addon \
+  --cluster-name myapp-production \
+  --addon-name adot \
+  --query "addon.status" \
+  --output text
+```
+
+```bash
+kubectl get pods -n opentelemetry-operator-system
+```
+
+```bash
+kubectl create sa adot-collector -n opentelemetry-operator-system
+```
+
+```bash
+kubectl annotate sa adot-collector -n opentelemetry-operator-system \
+  eks.amazonaws.com/role-arn=$ROLE_ARN \
+  --overwrite
+```
+
+```bash
+#Create the Collector YAML
+
+cat <<EOF | kubectl apply -f -
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: adot-collector
+  namespace: opentelemetry-operator-system
+spec:
+  mode: deployment
+  serviceAccount: adot-collector
+  config: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+    exporters:
+      awsxray:
+        region: us-east-1
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [awsxray]
+EOF
+```
+
+```bash
+kubectl get pods -n opentelemetry-operator-system
+
+kubectl get svc -n opentelemetry-operator-system
+
+kubectl logs -n opentelemetry-operator-system deployment/adot-collector-collector
+```
+
 **Upgrade EKS Cluster**
 
 - Review the kubernetes release notes, check for deprecated apis, ensure all addons (vpc cni, coredns, kube-proxy) are compatible with the target version. Perform a full test upgrade in the staging environment before upgrading prod cluster.
