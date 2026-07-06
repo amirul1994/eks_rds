@@ -83,6 +83,15 @@ resource "aws_security_group" "cluster" {
     }
 }
 
+resource "aws_security_group_rule" "cluster_ingress_bastion" {
+    type = "ingress"
+    from_port = 443
+    to_port = 443
+    protocol = "tcp"
+    source_security_group_id = var.bastion_security_group_id
+    security_group_id = aws_security_group.cluster.id
+}
+
 resource "aws_security_group" "node" {
     vpc_id = var.vpc_id
 
