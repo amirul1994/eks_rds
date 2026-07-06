@@ -1753,6 +1753,12 @@ aws eks update-kubeconfig \
 **Deploy AWS Alb Controller**
 
 ```bash
+kubectl create sa aws-load-balancer-controller -n kube-system
+
+kubectl annotate sa aws-load-balancer-controller \
+  -n kube-system \
+  eks.amazonaws.com/role-arn=arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/myapp-production-aws-load-balancer-controller-irsa
+
 helm repo add eks https://aws.github.io/eks-charts
 
 helm repo update
@@ -1766,7 +1772,14 @@ helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
   --set vpcId=$(terraform output -raw vpc_id)
 ```
 
-**Enable Monitoring for Data Plane**
+**Enable Monitoring and Logging for Data Plane**
+
+```bash
+eksctl utils associate-iam-oidc-provider \
+  --region us-east-1 \
+  --cluster myapp-production \
+  --approve
+```
 
 ```bash
 eksctl create iamserviceaccount \
@@ -1793,31 +1806,150 @@ aws eks create-addon \
 
 ```bash
 
-helm repo add autoscaler https://kubernetes.github.io/autoscaler
+#Create the Policy Document
+cat > cluster-autoscaler-policy.json <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribeAutoScalingInstances",
+                "autoscaling:DescribeLaunchConfigurations",
+                "autoscaling:DescribeScalingActivities",
+                "autoscaling:DescribeTags",
+                "ec2:DescribeInstanceTypes",
+                "ec2:DescribeLaunchTemplateVersions"
+            ],
+            "Resource": ["*"]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "autoscaling:SetDesiredCapacity",
+                "autoscaling:TerminateInstanceInAutoScalingGroup",
+                "autoscaling:UpdateAutoScalingGroup",
+                "ec2:DescribeImages",
+                "ec2:GetInstanceTypesFromInstanceRequirements",
+                "eks:DescribeNodegroup"
+            ],
+            "Resource": ["*"]
+        }
+    ]
+}
+EOF
+```
 
+```bash
+#Create the IAM Policy
+
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+aws iam create-policy \
+  --policy-name AmazonEKSClusterAutoscalerPolicy \
+  --policy-document file://cluster-autoscaler-policy.json
+```
+
+```bash
+#Get the OIDC Provider ARN
+
+OIDC_ARN=$(aws iam list-open-id-connect-providers --query "OpenIDConnectProviderList[0]" --output text)
+echo "OIDC ARN: $OIDC_ARN"
+```
+
+```bash
+#Create the Trust Policy
+
+cat > trust-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "$OIDC_ARN"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.us-east-1.amazonaws.com/id/46488685AC5CD97ECB03853DE89C4BD7:sub": "system:serviceaccount:kube-system:cluster-autoscaler"
+        }
+      }
+    }
+  ]
+}
+EOF
+```
+
+```bash
+
+#Create the IAM Role
+
+aws iam create-role \
+  --role-name myapp-production-cluster-autoscaler \
+  --assume-role-policy-document file://trust-policy.json
+```
+
+```bash
+
+#Attach the Policy to the Role
+
+aws iam attach-role-policy \
+  --role-name myapp-production-cluster-autoscaler \
+  --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/AmazonEKSClusterAutoscalerPolicy
+```
+
+```bash
+
+#Create the Service Account
+
+kubectl create sa cluster-autoscaler -n kube-system
+```
+
+```bash
+
+#Get the Role ARN
+
+ROLE_ARN=$(aws iam get-role --role-name myapp-production-cluster-autoscaler --query "Role.Arn" --output text)
+echo "Role ARN: $ROLE_ARN"
+```
+
+```bash
+
+#Annotate the Service Account
+
+kubectl annotate sa cluster-autoscaler -n kube-system \
+  eks.amazonaws.com/role-arn=$ROLE_ARN \
+  --overwrite
+```
+
+```bash
+
+kubectl get sa cluster-autoscaler -n kube-system -o yaml | grep -A2 "annotations:"
+```
+
+```bash
+
+helm repo add autoscaler https://kubernetes.github.io/autoscaler
 helm repo update
+```
+
+```bash
 
 helm install cluster-autoscaler autoscaler/cluster-autoscaler \
   -n kube-system \
   --set autoDiscovery.clusterName=myapp-production \
   --set awsRegion=us-east-1 \
   --set cloudProvider=aws \
-  --set rbac.serviceAccount.create=true \
+  --set rbac.serviceAccount.create=false \
   --set rbac.serviceAccount.name=cluster-autoscaler \
   --set extraArgs.expander=least-waste \
   --set extraArgs.skip-nodes-with-local-storage=false \
   --set extraArgs.balance-similar-node-groups=true \
+  --set extraArgs.scale-down-utilization-threshold=0.5 \
   --set awsUseStaticInstanceList=true \
-  --set extraArgs.node-group-auto-discovery="asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/myapp-production"
-```
-
-**Enable Logging for Data Plane**
-
-```bash
-aws eks create-addon \
-  --addon-name amazon-cloudwatch-observability \
-  --cluster-name myapp-production \
-  --service-account-role-arn arn:aws:iam::YOUR_ACCOUNT_ID:role/AmazonCloudWatchObservabilityRole
+  --set-string extraArgs.node-group-auto-discovery="asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/myapp-production"
 ```
 
 **Upgrade EKS Cluster**
