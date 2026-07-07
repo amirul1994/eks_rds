@@ -84,6 +84,6 @@ jobs:
           ECR_REPOSITORY: ${{ matrix.service == 'frontend' && env.FRONTEND_REPO || env.BACKEND_REPO }}
         run: |
           cd ${{ matrix.service }}
-          TAG = ${GITHUB_SHA::7}
+          TAG=${GITHUB_SHA::7}
           docker build -t $ECR_REPOSITORY:$TAG .
           docker push $ECR_REPOSITORY:$TAG
