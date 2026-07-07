@@ -1,9 +1,5 @@
 ## Configure OIDC for GitHub
 
-Configure in the AWS console as per following
-
-## Configure AWS IAM Identity Provider for GitHub Actions
-
 ### Step 1: Navigate to IAM → Identity Providers
 
 1. Go to **AWS Console** → **IAM**
