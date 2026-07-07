@@ -46,3 +46,7 @@ output "eks_cluster_ca_data" {
 output "oidc_provider_url" {
     value = module.eks.oidc_provider_url
 }
+
+output "bastion_public_ip" {
+    value = module.bastion.instance_public_ip
+}

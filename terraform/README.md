@@ -1763,13 +1763,17 @@ helm repo add eks https://aws.github.io/eks-charts
 
 helm repo update
 
+CLUSTER_NAME=$(aws eks list-clusters --query "clusters[0]" --output text)
+
+VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --query "cluster.resourcesVpcConfig.vpcId" --output text)
+
 helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
   -n kube-system \
-  --set clusterName=$(terraform output -raw eks_cluster_name) \
+  --set clusterName=$CLUSTER_NAME \
   --set serviceAccount.create=false \
   --set serviceAccount.name=aws-load-balancer-controller \
   --set region=us-east-1 \
-  --set vpcId=$(terraform output -raw vpc_id)
+  --set vpcId=$VPC_ID
 ```
 
 **Enable Monitoring and Logging for Data Plane**
