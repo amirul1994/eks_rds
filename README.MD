@@ -1,8 +1,26 @@
-## Configure OIDC for GitHub Actions
+## Configure OIDC for GitHub
 
 Configure in the AWS console as per following
 
-![alt text](pic1.jpg)
+## Configure AWS IAM Identity Provider for GitHub Actions
+
+### Step 1: Navigate to IAM → Identity Providers
+
+1. Go to **AWS Console** → **IAM**
+2. Click **Identity providers** in the left sidebar
+3. Click **Add provider**
+
+### Step 2: Fill in Provider Details
+
+| Field          | Value                                      |
+|----------------|--------------------------------------------|
+| Provider type  | ✅ Select **OpenID Connect**               |
+| Provider URL   | `https://token.actions.githubusercontent.com` |
+| Audience       | `sts.amazonaws.com`                        |
+
+### Step 3: Complete Setup
+
+- Click **Add provider**
 
 **Create an OIDC Trust Policy**
 
