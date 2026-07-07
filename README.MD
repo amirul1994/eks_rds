@@ -2,8 +2,7 @@
 
 Configure in the AWS console as per following
 
-![alt text](Picture.png)
-
+![alt text](pic1.jpg)
 
 **Create an OIDC Trust Policy**
 

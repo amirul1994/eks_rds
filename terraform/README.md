@@ -1753,6 +1753,8 @@ aws eks update-kubeconfig \
 **Deploy AWS Alb Controller**
 
 ```bash
+eksctl utils associate-iam-oidc-provider --cluster myapp-production --approve
+
 kubectl create sa aws-load-balancer-controller -n kube-system
 
 kubectl annotate sa aws-load-balancer-controller \
