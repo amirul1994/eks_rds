@@ -1,0 +1,89 @@
+name: ci_cd
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'terraform/'
+      - '**/*.png'
+
+env:
+  FRONTEND_IMG: eks-rds-frontend
+  BACKEND_IMG: eks-rds-backend
+  FRONTEND_REPO: 381491977476.dkr.ecr.us-east-1.amazonaws.com/myapp-production-frontend
+  BACKEND_REPO: 381491977476.dkr.ecr.us-east-1.amazonaws.com/myapp-production-backend
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      
+      - name: detect changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend: 
+              - 'frontend/**'
+            backend:
+              - 'backend/**'
+      
+      - name: test
+        run: |
+          docker compose up -d
+          sleep 60
+          curl -f http://localhost:10000/
+          curl -f http://localhost:10000/api/
+          docker compose stop
+    
+  build_push:
+    needs: detect-changes
+    runs-on: ubuntu:latest
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      matrix:
+        service: [frontend, backend]
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for service change 
+        id: check
+        run: |
+          if [[ "${{ needs.detect-changes.outputs[matrix.service ]}}" == "true" ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Configure AWS credentials
+        if: steps.check.outputs.changed == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::381491977476:role/github-actions-ecr-role
+          aws-region: us-east-1
+      
+      - name: Login to ecr
+        if: steps.check.outputs.changed == 'true'
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: build and push ${{ matrix.service }} image
+        if: steps.check.outputs.changed == 'true'
+        env:
+          ECR_REGISTRY: 381491977476.dkr.ecr.us-east-1.amazonaws.com
+          ECR_REPOSITORY: ${{ matrix.service == 'frontend' && env.FRONTEND_REPO || env.BACKEND_REPO }}
+          TAG: ${{ github.sha[0:7] }}
+        run: |
+          cd ${{ matrix.service }}
+          docker build -t $ECR_REPOSITORY:$TAG .
+          docker push $ECR_REPOSITORY:$TAG
