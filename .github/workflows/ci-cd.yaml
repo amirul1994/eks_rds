@@ -82,8 +82,8 @@ jobs:
         env:
           ECR_REGISTRY: 381491977476.dkr.ecr.us-east-1.amazonaws.com
           ECR_REPOSITORY: ${{ matrix.service == 'frontend' && env.FRONTEND_REPO || env.BACKEND_REPO }}
-          TAG: ${{ github.sha[0:7] }}
         run: |
           cd ${{ matrix.service }}
+          TAG = $(git rev-parse --short HEAD)
           docker build -t $ECR_REPOSITORY:$TAG .
           docker push $ECR_REPOSITORY:$TAG
