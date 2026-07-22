@@ -1,5 +1,3 @@
-**For Task 4 and Task 5 I have used Terraform**
-
 ## Complete Diagram
 
 ![alt text](logicmatrix_full_diagram.png)
@@ -44,7 +42,7 @@ The secret is encrypted when it is stored via aws kms. The terraform execution r
 
 ## EKS
 
-![alt text](logicmatrix_eks_diagram.png) 
+![alt text](logicmatrix_eks_diagram.png)
 
 For eks deployment, I have created modules. The terraform directory structure for is as follows -
 ```text
